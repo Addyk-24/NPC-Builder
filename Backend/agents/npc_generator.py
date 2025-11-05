@@ -1,10 +1,19 @@
-from agno.agent import Agent
-from agno.models.huggingface import HuggingFace
+from langchain.agents import create_agent
+from langchain.agents.middleware import dynamic_prompt, ModelRequest
+
+from system_prompt.search_agent_prompt import search_prompt
+
 
 llm = HuggingFace(
         id="Intel/sd-1.5-square-quantized",
         max_tokens=4096,
     ),
+
+search_agent = create_agent(
+    model=llm,
+    
+
+)
 
 npc_agent = Agent(
     model = llm,
