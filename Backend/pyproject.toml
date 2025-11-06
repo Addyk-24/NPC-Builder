@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "deepagents>=0.2.5",
+    "diffusers>=0.35.2",
+    "huggingface-hub>=1.1.1",
     "langchain>=1.0.3",
     "langchain-community>=0.4.1",
     "langchain-mcp-adapters>=0.1.12",

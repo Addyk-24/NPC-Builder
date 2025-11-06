@@ -6,9 +6,23 @@ from deepagents import create_deep_agent
 from system_prompt.search_agent_prompt import search_prompt
 from agent_tools.search_tool import web_search_tool
 
+
+from langchain_huggingface.llms import HuggingFacePipeline
+from transformers import pipeline
+from diffusers import DiffusionPipeline
+
+
+
+model_pipe = DiffusionPipeline.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0")
+
+
+hf = HuggingFacePipeline(pipeline=model_pipe)
+
 llm = init_chat_model(
     model="gpt-5",
 )
+
+image_llm = ""
 
 search_agent = create_agent(
     model=llm,
