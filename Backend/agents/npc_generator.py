@@ -1,21 +1,28 @@
 from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt, ModelRequest
+from langchain.chat_models import init_chat_model
+from deepagents import create_deep_agent
 
 from system_prompt.search_agent_prompt import search_prompt
+from agent_tools.search_tool import web_search_tool
 
-
-llm = HuggingFace(
-        id="Intel/sd-1.5-square-quantized",
-        max_tokens=4096,
-    ),
+llm = init_chat_model(
+    model="gpt-5",
+)
 
 search_agent = create_agent(
     model=llm,
-    
+    tools=[web_search_tool],
+    system_prompt=search_prompt,
 
 )
 
-npc_agent = Agent(
+img_agent = create_agent(
+    
+)
+
+
+npc_agent = create_deep_agent(
     model = llm,
     instructions=""" You are NPC Agent that takes query as input and generate image of that given input and give that image as output 
     Important:
