@@ -18,6 +18,7 @@ search_agent = create_agent(
 )
 
 img_agent = create_agent(
+    model=llm
     
 )
 
