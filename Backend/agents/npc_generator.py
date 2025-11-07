@@ -1,6 +1,10 @@
 from dataclasses import dataclass
 from PIL import Image
 from typing import TypedDict, Annotated, Optional
+from uuid import uuid4 
+import io
+import base64
+import torch
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt, ModelRequest
@@ -43,7 +47,7 @@ class WebSearchResponse:
 
 @dataclass
 class ImageGenerationPrompt:
-    query_response: QueryProcessingResponse
+    query_response: str
     search_key_info : str
     search_additional_info : str
 
@@ -52,32 +56,46 @@ llm = init_chat_model(
     model="gpt-5",
 )
 
-image_llm = ""
-
 
 
 class NPCBuilder:
 
     def __init__(self):
         self.llm = llm,
-        self.query_processing_agent = None
-        self.search_agent = None
-        self.img_prompt_processing_agent = None
-        self.img_gen_agent = None
+        self.query_processing_agent = create_agent(
+                model=llm,
+                system_prompt=query_processing,
+                response_format=QueryProcessingResponse
+            )
+        
+        self.search_agent = create_agent(
+                model=llm,
+                tools=[web_search_tool],
+                system_prompt=search_prompt,
+                response_format=WebSearchResponse
+            )
+        
+
+        self.image_generation_tool = img_pipeline
         self.num_inference_steps = 50
         self.guidance_scale = 7.5
         self.negative_prompt = negative_prompt_generation
         self.height = 512
         self.width = 512
     
+    def save_image(self,image:Image,filename:str):
+        """ Save generated Image to File """
+        try:
+            with open(filename, "wb") as f:
+                image.save(f, format="PNG")
+
+        except Exception as e:
+            raise ValueError(f"Error in save Image: {e}")
+
     def generate_query_response(self,query:str,state:AgentState):
         """ Generate NPC Character Image from given query """
         try:
-            self.query_processing_agent = create_agent(
-                model=llm,
-                system_prompt=query_processing,
-                response_format=QueryProcessingResponse()
-            )
+            self.query_processing_agent =
 
             # `thread_id` is a unique identifier for a given conversation.
             config = {"configurable": {"thread_id": "1"}}
@@ -85,7 +103,7 @@ class NPCBuilder:
             query_response = self.query_processing_agent.invoke(
                 {"messages": [{"role": "user", "content": "what is the weather outside?"}]},
                 config=config,
-                context=Context(user_id="1")
+                context=Context(user_id=str(uuid4()))
             )
 
             return query_response
@@ -98,16 +116,11 @@ class NPCBuilder:
         """ Internet Search to get relevant info about query """
 
         try:
-            self.search_agent = create_agent(
-                model=llm,
-                tools=[web_search_tool],
-                system_prompt=search_prompt,
-                response_format=WebSearchResponse()
-            )
+            self.search_agent = 
 
             search_response = self.search_agent.invoke(
                 {"messages": [{"role": "user", "content": query_response.structured_summary}]},
-                context=Context(user_id="1")
+                context=Context(user_id=str(uuid4()))
             )
 
             return search_response
@@ -133,7 +146,7 @@ class NPCBuilder:
 
             img_prompt = self.img_prompt_processing_agent.invoke(
                 {"messages": [{"role": "user", "content": "Generate detailed image prompt based on above information."}]},
-                context=Context(user_id="1")
+                context=Context(user_id=str(uuid4()))
             )
 
             return img_prompt
@@ -145,10 +158,9 @@ class NPCBuilder:
         """ Generate NPC Image from given Query """
         
         self.img_gen_agent = create_agent(
-            model=image_llm,
-            tools=[img_pipeline],
+            tools=[self.image_generation_tool],
             system_prompt=image_prompt,
-            response_format=bytes,            
+            response_format=Image.Image,            
         )
 
 
@@ -175,19 +187,3 @@ class NPCBuilder:
 
         return result
 
-    def create_npc_agent(self):
-        """ Generating NPC From Subagents """
-
-        subagents = [self.query_processing_agent,self.search_agent,self.img_prompt_processing_agent,self.img_gen_agent]
-
-        npc_agent = create_deep_agent(
-            model = llm,
-            instructions=""" You are NPC Agent that takes query as input and generate image of that given input and give that image as output 
-            Important:
-            - Be more precise on query like what query really tell and then generate image
-            """,
-            description=""" You have Generated lot of image from given query and now you are improving it and stick to point like generate image what query has stated """,
-            tools=[],
-            subagents=subagents,
-            
-        )
