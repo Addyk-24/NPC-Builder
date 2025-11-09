@@ -22,11 +22,7 @@ def web_search_tool(query: str) -> str:
     """ Web tool that will search whole internet for given query and return relevant info """
 
     try:
-
         search_results = search_wrapper.run(query)
-
-    
-
         return search_results
     
     except Exception as e:
