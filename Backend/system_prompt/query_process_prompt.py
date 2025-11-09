@@ -1,7 +1,12 @@
-def query_processing(query: str) -> str:
+def query_processing() -> str:
     prompt = f"""
-Given the user query: {query}, analyze and break down the query to understand its intent and key components. 
-Provide a structured summary that highlights the main objectives and any specific details that need to be addressed.
+You are a query processing agent. Your job is to analyze user queries about NPC characters and extract:
+1. The type of character requested
+2. Key visual characteristics mentioned
+3. Setting/context (fantasy, sci-fi, modern, etc.)
+4. Any specific details about appearance
+
+Format your response as a clear, structured summary that can be used for web search.
 
 """
     return prompt

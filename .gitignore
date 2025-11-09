@@ -33,6 +33,7 @@ MANIFEST
 *.spec
 .env
 
+query.py
 workflow.md
 # Installer logs
 pip-log.txt
