@@ -68,7 +68,7 @@ llm = ChatGroq(
 )
 
 # model_path = "stabilityai/sd-turbo"
-model_path = model_path = "runwayml/stable-diffusion-v1-5" 
+model_path = model_path = "runwayml/stable-diffusion-v1-5"
 
 
 class NPCBuilder:
@@ -186,7 +186,7 @@ class NPCBuilder:
 
             Create a detailed Stable Diffusion prompt for an NPC character image.
             Include: visual appearance, clothing, pose, lighting, art style, quality modifiers.
-            Keep it under 77 tokens.
+            Keep it under 90 tokens.
             
             """
             self.img_prompt_processing_agent = create_agent(
@@ -295,8 +295,7 @@ if __name__ == "__main__":
     builder = NPCBuilder()
     # prompt ="Create a npc character which is indian origin and wearing indian cops uniform"
     prompt = """
-Official Ken Sugimori style Pokémon art of a creature. A Ground and Steel type monster. It has the body shape of a large, armored armadillo, with heavy metal plates, a drill on its nose, and glowing red eyes. Its color palette is brown, grey, and orange. Dynamic pose, simple background, smooth, clean line art, high detail, trending on ArtStation.
-
+A young female samurai disguised as a traveling monk, her face calm but eyes filled with vengeance. Wears layered monk robes over light armor, carrying a katana wrapped in cloth. Snow falls around her as she walks through a desolate mountain temple. Cinematic lighting, detailed environment, Japanese mythology atmosphere, emotional realism.
 """
 
     agent_result = builder.run_agent(prompt)
