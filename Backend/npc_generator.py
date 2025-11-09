@@ -293,22 +293,8 @@ class NPCBuilder:
 
 if __name__ == "__main__":
     builder = NPCBuilder()
-    # prompt ="Create a npc character which is indian origin and wearing indian cops uniform"
     prompt = """
 A young female samurai disguised as a traveling monk, her face calm but eyes filled with vengeance. Wears layered monk robes over light armor, carrying a katana wrapped in cloth. Snow falls around her as she walks through a desolate mountain temple. Cinematic lighting, detailed environment, Japanese mythology atmosphere, emotional realism.
 """
 
     agent_result = builder.run_agent(prompt)
-
-    # print(agent_result)
-
-
-
-# """
-#    Character concept art, a detailed NPC character design in the style of Fortnite, vibrant colors, stylized 3D render, cel-shaded, Unreal Engine, trending on ArtStation. The character is a [description of NPC role, e.g., 'rugged space bounty hunter'], [description of physical traits, e.g., 'tall, muscular male'], wearing [description of outfit and accessories, Full body shot, dynamic pose, clean background.
-# """
-
-# """
-# Official Ken Sugimori style Pokémon art of a creature. A Ground and Steel type monster. It has the body shape of a large, armored armadillo, with heavy metal plates, a drill on its nose, and glowing red eyes. Its color palette is brown, grey, and orange. Dynamic pose, simple background, smooth, clean line art, high detail, trending on ArtStation.
-
-# """
