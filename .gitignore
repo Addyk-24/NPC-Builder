@@ -32,7 +32,7 @@ MANIFEST
 *.manifest
 *.spec
 .env
-
+example
 query.py
 workflow.md
 # Installer logs
