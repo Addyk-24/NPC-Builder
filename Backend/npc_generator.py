@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 import os, tempfile, gc
+import numpy as np
 from dataclasses import dataclass
 from PIL import Image
 from typing import TypedDict, Annotated, Optional
@@ -8,6 +9,9 @@ from uuid import uuid4
 import io
 import base64
 import torch
+
+import open3d as o3d
+
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt, ModelRequest
@@ -25,18 +29,33 @@ from agent_tools.search_tool import web_search_tool
 from system_prompt.query_process_prompt import query_processing
 from system_prompt.search_agent_prompt import search_prompt
 from system_prompt.negative_prompt import negative_prompt_generation
+from agent_tools.image_transformation import generate_depth_scale, normal_map_from_depth
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 class AgentState(TypedDict):
+    # Query processing
     query: str
     structured_summary: Optional[str]
     key_info: Optional[str] 
     additional_info: Optional[str] 
     explanation: Optional[str]
+
+    # Img gen
     image_prompt: Optional[str]
     generated_image: Optional[str]  # base64 encoded
+
+    # Normal mapping
+    depth_array : Optional[np.ndarray]
+    normal_map : Optional[np.ndarray]
+    normal_map_path : Optional[str]
+    mesh_file : Optional[str]
+    mesh_file : Optional[str]
+
+    # Post Task Messages
     messages: Annotated[list, add_messages]
+
+
 
 @dataclass
 class QueryProcessingResponse:
@@ -85,7 +104,11 @@ class NPCBuilder:
         # System Prompts
         self.negative_prompt = negative_prompt_generation()
         self.query_response = query_processing()
+
+        # Agent tools
         self.search_response = search_prompt()
+        self.depth_scale_generation = generate_depth_scale()
+        self.normal_map_generation = normal_map_from_depth()
 
         # Agents
         self.query_processing_agent = create_agent(
@@ -253,7 +276,97 @@ class NPCBuilder:
             state["messages"].append({"role": "assistant", "content": f"Error generating image: {e}"})
             return state
 
+    def generate_normal_map(self,image_path:str):
+        """Node 5: Generate normal map from depth scale map"""
+        try:
 
+            depth_array = generate_depth_scale(image_path)
+
+            self.state["depth_array"] = depth_array
+
+            if depth_array is None:
+                self.state["message"].append({
+                    "role":"assistant",
+                    "content": "No map Found, skipping Normal map gen"
+                })
+                return self.state
+            
+            normal_map = normal_map_from_depth(depth_array,depth_scale=2.0)
+
+            normal_img = Image.fromarray(normal_map)
+            normal_filename = f"normal_{uuid4()}.png"
+            normal_img.save(normal_filename)
+            
+            self.state["normal_map"] = normal_map                    
+            self.state["normal_map_path"] = normal_filename
+
+            self.state["messages"].append({
+                "role": "assistant",
+                "content": f"Normal map generated: {normal_filename}"
+            })
+
+            return self.state
+        
+        except Exception as e:
+            self.state["messages"].append({
+                "role": "assistant",
+                "content": f"Error generating normal map: {e}"
+            })
+            return self.state
+
+    def generate_point_cloud(self, state: AgentState) -> AgentState:
+        """ Node 6: Generation of 3D Point Cloud from normal map"""
+        try:
+            depth_array = state["depth_array"]
+            img_base64 = state["generated_image"]
+            img_data = base64.b64decode(img_base64)
+            npc_image = np.array(Image.open(io.BytesIO(img_data)))
+
+            # Camera intrinsics
+            height, width = depth_array.shape
+            fx = fy = 500
+            cx, cy = width / 2, height / 2
+
+            points = []
+            colors = []
+
+            for v in range(0,height,2):
+                for u in range(0,width,2):
+                    z= depth_array[u,v] * 100
+                    if z >0:
+                        x = (u-cx) * z / fx
+                        y = (v-cy) * z / fy
+                        points.append([x, y, z])
+                        colors.append(npc_image[v, u] / 255.0)
+                    
+                pcd  = o3d.geometry.PointCloud()
+                pcd.points = o3d.utility.Vector3dVector(np.array(points))
+                pcd.colors = o3d.utility.Vector3dVector(np.array(colors))
+
+                # Estimating normals if not proceeding with normal map
+                pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=10, max_nn=30))
+                
+                # Save point cloud
+                pcd_filename = f"pointcloud_{uuid4()}.ply"
+                o3d.io.write_point_cloud(pcd_filename, pcd)
+
+                state["point_cloud"] = pcd
+                state["point_cloud_path"] = pcd_filename
+                
+                state["messages"].append({
+                    "role": "assistant",
+                    "content": f"Point cloud created: {pcd_filename}"
+                })
+                
+                return state
+
+        except Exception as e:
+            state["messages"].append({
+                "role": "assistant",
+                "content": f"Error creating point cloud: {e}"
+            })
+            return state
+        
     def build_workflow(self):
         """ Define and Build WOrkflow for Sequential Flow of Agent """
 
