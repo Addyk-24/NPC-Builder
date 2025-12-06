@@ -10,6 +10,9 @@ import io
 import base64
 import torch
 
+from transformers import pipeline
+
+
 import open3d as o3d
 
 
@@ -29,7 +32,6 @@ from agent_tools.search_tool import web_search_tool
 from system_prompt.query_process_prompt import query_processing
 from system_prompt.search_agent_prompt import search_prompt
 from system_prompt.negative_prompt import negative_prompt_generation
-from agent_tools.image_transformation import generate_depth_scale, normal_map_from_depth
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
@@ -50,7 +52,9 @@ class AgentState(TypedDict):
     normal_map : Optional[np.ndarray]
     normal_map_path : Optional[str]
     mesh_file : Optional[str]
-    mesh_file : Optional[str]
+
+    point_cloud: Optional[o3d.geometry.PointCloud]
+    point_cloud_path: Optional[str]
 
     # Post Task Messages
     messages: Annotated[list, add_messages]
@@ -87,7 +91,7 @@ llm = ChatGroq(
 )
 
 # model_path = "stabilityai/sd-turbo"
-model_path = model_path = "runwayml/stable-diffusion-v1-5"
+model_path = "runwayml/stable-diffusion-v1-5"
 
 
 class NPCBuilder:
@@ -101,15 +105,15 @@ class NPCBuilder:
         ).to(self.device)
             # torch_dtype=torch.float16
 
+        self.depth_model_path = "LiheYoung/depth-anything-small-hf"
+
         # System Prompts
         self.negative_prompt = negative_prompt_generation()
         self.query_response = query_processing()
 
         # Agent tools
         self.search_response = search_prompt()
-        self.depth_scale_generation = generate_depth_scale()
-        self.normal_map_generation = normal_map_from_depth()
-
+    
         # Agents
         self.query_processing_agent = create_agent(
                 model=llm,
@@ -276,46 +280,114 @@ class NPCBuilder:
             state["messages"].append({"role": "assistant", "content": f"Error generating image: {e}"})
             return state
 
-    def generate_normal_map(self,image_path:str):
-        """Node 5: Generate normal map from depth scale map"""
+    def generate_depth_scale(self, state: AgentState) -> AgentState:
+
+        """Node 5: Generate Depth Scale map"""
+
+        try:
+            
+            depth_estimator = pipeline(
+                task="depth-estimation",
+                model= self.depth_model_path
+            )
+
+            img_base64 = state["generated_image"]
+            img_data = base64.b64decode(img_base64)
+            npc_image = Image.open(io.BytesIO(img_data))
+
+            # Generating depth scale
+            depth_result = depth_estimator(npc_image)
+
+            depth_array = np.asarray(depth_result["predicted_depth"])
+
+            # Normalize depth to 0-1 range
+            depth_normalized = (depth_array - depth_array.min()) / (depth_array.max() - depth_array.min())
+            
+            state["depth_array"] = depth_normalized
+
+            depth_img = Image.fromarray((depth_normalized * 255).astype(np.uint8))
+            depth_filename = f"depth_{uuid4()}.png"
+            depth_img.save(depth_filename)
+            
+            state["messages"].append({
+                "role": "assistant",
+                "content": f"Depth map generated: {depth_filename}"
+            })
+            return state
+        
+        except Exception as e:
+            state["messages"].append({
+                "role": "assistant",
+                "content": f"Error generating depth: {e}"
+            })
+            return state
+        
+    def normal_map_from_depth(self,depth_array: np.ndarray, depth_scale: float = 1.0) -> np.ndarray:
+        """
+        Generates a normal map from a given depth map
+        
+        Args:
+            depth_array: 2D numpy array 
+            depth_scale: depth values (affects surface bumpiness)
+        
+        Returns:
+            np.ndarray: RGB normal map (H, W, 3) with values 0-255
+        """
+        
+        depth_scaled = depth_array*depth_scale
+        
+        dz_dy, dz_dx = np.gradient(depth_scaled)
+        
+
+        normals = np.dstack([-dz_dx,-dz_dy,np.ones_like(depth_array)])
+        
+        norm = np.linalg.norm(normals,axis=2,keepdims=True)
+        normals_normalized = normals / (norm + 1e-8) 
+        
+        # Convert from [-1, 1] to [0, 255] for RGB image
+        normal_map_rgb = ((normals_normalized + 1.0) * 127.5).astype(np.uint8)
+        
+        return normal_map_rgb
+
+    def generate_normal_map(self,state: AgentState) -> AgentState:
+        """Node 6: Generate normal map from depth scale map"""
         try:
 
-            depth_array = generate_depth_scale(image_path)
+            depth_array = state.get("depth_array")
 
-            self.state["depth_array"] = depth_array
 
             if depth_array is None:
-                self.state["message"].append({
+                state["messages"].append({
                     "role":"assistant",
                     "content": "No map Found, skipping Normal map gen"
                 })
-                return self.state
+                return state
             
-            normal_map = normal_map_from_depth(depth_array,depth_scale=2.0)
+            normal_map = self.normal_map_from_depth(depth_array,depth_scale=2.0)
 
             normal_img = Image.fromarray(normal_map)
             normal_filename = f"normal_{uuid4()}.png"
             normal_img.save(normal_filename)
             
-            self.state["normal_map"] = normal_map                    
-            self.state["normal_map_path"] = normal_filename
+            state["normal_map"] = normal_map                    
+            state["normal_map_path"] = normal_filename
 
-            self.state["messages"].append({
+            state["messages"].append({
                 "role": "assistant",
                 "content": f"Normal map generated: {normal_filename}"
             })
 
-            return self.state
+            return state
         
         except Exception as e:
-            self.state["messages"].append({
+            state["messages"].append({
                 "role": "assistant",
                 "content": f"Error generating normal map: {e}"
             })
-            return self.state
+            return state
 
     def generate_point_cloud(self, state: AgentState) -> AgentState:
-        """ Node 6: Generation of 3D Point Cloud from normal map"""
+        """ Node 7: Generation of 3D Point Cloud from normal map"""
         try:
             depth_array = state["depth_array"]
             img_base64 = state["generated_image"]
@@ -332,33 +404,33 @@ class NPCBuilder:
 
             for v in range(0,height,2):
                 for u in range(0,width,2):
-                    z= depth_array[u,v] * 100
+                    z= depth_array[v, u] * 100
                     if z >0:
                         x = (u-cx) * z / fx
                         y = (v-cy) * z / fy
                         points.append([x, y, z])
                         colors.append(npc_image[v, u] / 255.0)
                     
-                pcd  = o3d.geometry.PointCloud()
-                pcd.points = o3d.utility.Vector3dVector(np.array(points))
-                pcd.colors = o3d.utility.Vector3dVector(np.array(colors))
+            pcd  = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(np.array(points))
+            pcd.colors = o3d.utility.Vector3dVector(np.array(colors))
 
-                # Estimating normals if not proceeding with normal map
-                pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=10, max_nn=30))
-                
-                # Save point cloud
-                pcd_filename = f"pointcloud_{uuid4()}.ply"
-                o3d.io.write_point_cloud(pcd_filename, pcd)
+            # Estimating normals if not proceeding with normal map
+            pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=10, max_nn=30))
+            
+            # Save point cloud
+            pcd_filename = f"pointcloud_{uuid4()}.ply"
+            o3d.io.write_point_cloud(pcd_filename, pcd)
 
-                state["point_cloud"] = pcd
-                state["point_cloud_path"] = pcd_filename
-                
-                state["messages"].append({
-                    "role": "assistant",
-                    "content": f"Point cloud created: {pcd_filename}"
-                })
-                
-                return state
+            state["point_cloud"] = pcd
+            state["point_cloud_path"] = pcd_filename
+            
+            state["messages"].append({
+                "role": "assistant",
+                "content": f"Point cloud created: {pcd_filename}"
+            })
+            
+            return state
 
         except Exception as e:
             state["messages"].append({
@@ -366,6 +438,51 @@ class NPCBuilder:
                 "content": f"Error creating point cloud: {e}"
             })
             return state
+    
+    def reconstruct_mesh(self,state: AgentState) -> AgentState:
+        """Node 8: Reconstruct 3D mesh from point cloud"""
+        
+        try:
+
+            pcd = state["point_cloud"]
+
+            print("Reconstructing mesh :) .... ")
+
+            mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
+                pcd,
+                depth=9,
+                width=0,
+                scale=1.1,
+                linear_fit=False
+            )
+
+            # Remove low-density vertices (noise)
+            vertices_to_remove = densities < np.quantile(densities, 0.1)
+            mesh.remove_vertices_by_mask(vertices_to_remove)
+            
+            # Smooth mesh
+            mesh = mesh.filter_smooth_simple(number_of_iterations=2)
+
+            # Save as GLB -> web viewing
+            mesh_filename = f"npc_mesh_{uuid4()}.glb"
+            o3d.io.write_triangle_mesh(mesh_filename, mesh)
+
+            state["mesh_file"] = mesh_filename
+
+            state["messages"].append({
+                "role": "assistant",
+                "content": f"3D mesh created: {mesh_filename}"
+            })
+            
+            return state
+    
+        except Exception as e:
+            state["messages"].append({
+                "role": "assistant",
+                "content": f"Error reconstructing mesh: {e}"
+            })
+            return state
+        
         
     def build_workflow(self):
         """ Define and Build WOrkflow for Sequential Flow of Agent """
@@ -377,14 +494,25 @@ class NPCBuilder:
         self.workflow.add_node("Generate Image Prompt", self.generate_img_prompt)
         self.workflow.add_node("Generate NPC Image", self.generate_npc_image)
 
+        self.workflow.add_node("Generate Depth Scale Map", self.generate_depth_scale)
+        self.workflow.add_node("Generate Normal Map", self.generate_normal_map) 
+        self.workflow.add_node("Generate Point Cloud", self.generate_point_cloud) 
+        self.workflow.add_node("Reconstruct Mesh", self.reconstruct_mesh) 
+
         self.workflow.add_edge("Generate Query Response","Generate Search Response")
         self.workflow.add_edge("Generate Search Response","Generate Image Prompt")
         self.workflow.add_edge("Generate Image Prompt","Generate NPC Image")
-        self.workflow.add_edge("Generate NPC Image", END)
+        
+        self.workflow.add_edge("Generate NPC Image", "Generate Depth Scale Map")
+        self.workflow.add_edge("Generate Depth Scale Map", "Generate Normal Map")
+        self.workflow.add_edge("Generate Normal Map", "Generate Point Cloud")
+        self.workflow.add_edge("Generate Point Cloud", "Reconstruct Mesh")
+        self.workflow.add_edge("Reconstruct Mesh", END)
 
         self.workflow.set_entry_point("Generate Query Response")
 
         main_agent = self.workflow.compile()
+
         self.workflow_agent = main_agent
 
     def run_agent(self,query:str):
