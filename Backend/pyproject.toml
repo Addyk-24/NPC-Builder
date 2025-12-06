@@ -15,6 +15,7 @@ dependencies = [
     "langchain-groq>=1.0.0",
     "langchain-mcp-adapters>=0.1.12",
     "langgraph>=1.0.2",
+    "open3d>=0.19.0",
     "rembg>=2.0.67",
     "tavily-python>=0.7.12",
     "tokenizers==0.19.1",
