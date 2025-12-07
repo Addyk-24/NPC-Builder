@@ -15,6 +15,7 @@ from transformers import pipeline
 
 import open3d as o3d
 
+# from transformers import AutoImageProcessor, AutoModelForDepthEstimation
 
 from langchain.agents import create_agent
 from langchain.agents.middleware import dynamic_prompt, ModelRequest
@@ -32,6 +33,7 @@ from agent_tools.search_tool import web_search_tool
 from system_prompt.query_process_prompt import query_processing
 from system_prompt.search_agent_prompt import search_prompt
 from system_prompt.negative_prompt import negative_prompt_generation
+
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
@@ -298,10 +300,32 @@ class NPCBuilder:
             # Generating depth scale
             depth_result = depth_estimator(npc_image)
 
-            depth_array = np.asarray(depth_result["predicted_depth"])
+            if "predicted_depth" in depth_result:
+                depth_data = depth_result["predicted_depth"]
+            elif "depth" in depth_result:
+                depth_data = depth_result["depth"]
+            else:
+                raise ValueError("Unexpected depth result format")
+            
+            if hasattr(depth_data,"numpy"):
+                depth_array = depth_data.cpu().numpy()
+            elif isinstance(depth_data, Image.Image):
+                depth_array = np.array(depth_data)
+            else:
+                # already numpy
+                depth_array = np.asarray(depth_data)
+
+            while len(depth_array.shape) > 2:
+                depth_array = depth_array.squeeze()
+            
+            if len(depth_array.shape) != 2:
+                raise ValueError(f"Depth array has wrong shape: {depth_array.shape}, expected 2D")
+            
+            print(f"Depth array shape: {depth_array.shape}") 
+
 
             # Normalize depth to 0-1 range
-            depth_normalized = (depth_array - depth_array.min()) / (depth_array.max() - depth_array.min())
+            depth_normalized = (depth_array - depth_array.min()) / (depth_array.max() - depth_array.min() + 1e-8)
             
             state["depth_array"] = depth_normalized
 
@@ -405,11 +429,23 @@ class NPCBuilder:
             for v in range(0,height,2):
                 for u in range(0,width,2):
                     z= depth_array[v, u] * 100
-                    if z >0:
+                    if z >0.1:
                         x = (u-cx) * z / fx
                         y = (v-cy) * z / fy
                         points.append([x, y, z])
-                        colors.append(npc_image[v, u] / 255.0)
+                        if len(npc_image.shape) == 3:
+                            if npc_image.shape[2] >= 3:
+                                colors.append(npc_image[v, u, :3] / 255.0)
+                            else:
+                                colors.append([0.5, 0.5, 0.5])
+                        else:
+                            gray = npc_image[v, u] / 255.0
+                            colors.append([gray, gray, gray])
+            
+            print(f"Generated {len(points)} points")
+            if len(points) == 0:
+                raise ValueError("No valid points generated from depth map")  
+                          
                     
             pcd  = o3d.geometry.PointCloud()
             pcd.points = o3d.utility.Vector3dVector(np.array(points))
@@ -418,9 +454,15 @@ class NPCBuilder:
             # Estimating normals if not proceeding with normal map
             pcd.estimate_normals(search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=10, max_nn=30))
             
+            # Orient normals consistently
+            pcd.orient_normals_consistent_tangent_plane(k=15)
+
             # Save point cloud
             pcd_filename = f"pointcloud_{uuid4()}.ply"
             o3d.io.write_point_cloud(pcd_filename, pcd)
+            
+            print(f"Point cloud saved: {pcd_filename}")
+
 
             state["point_cloud"] = pcd
             state["point_cloud_path"] = pcd_filename
